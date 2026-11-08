@@ -4,8 +4,6 @@
   // @ts-ignore - provided by VS Code
   const vscode = acquireVsCodeApi();
 
-  /** Number of distinct level colors (lvl-0 … lvl-3 in panel.css); deeper levels reuse the last. */
-  const LEVEL_CLASSES = 4;
 
   /** Bean kinds in board order, with their column title and short tag. */
   const KINDS = {
@@ -25,7 +23,6 @@
   const state = {
     /** @type {any} */ data: null,
     view: saved.view || "board",
-    groupBy: saved.groupBy || "level",
     filter: saved.filter || "",
     unusedOnly: !!saved.unusedOnly,
     /** @type {string | null} */ selectedId: null,
@@ -54,7 +51,6 @@
     String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] || c));
 
   const byName = (/** @type {any} */ a, /** @type {any} */ b) => a.name.localeCompare(b.name);
-  const lvl = (/** @type {number} */ level) => `lvl-${Math.min(Math.max(level, 0), LEVEL_CLASSES - 1)}`;
   const isUnused = (/** @type {any} */ b) => !b.used && !b.entryPoint;
   const nameMatches = (/** @type {any} */ b) =>
     (b.name.toLowerCase().includes(state.filter.toLowerCase()) || b.typeName.toLowerCase().includes(state.filter.toLowerCase()))
@@ -85,7 +81,7 @@
   }
 
   function saveState() {
-    vscode.setState({ view: state.view, groupBy: state.groupBy, filter: state.filter, unusedOnly: state.unusedOnly });
+    vscode.setState({ view: state.view, filter: state.filter, unusedOnly: state.unusedOnly });
   }
 
   function index() {
@@ -187,10 +183,6 @@
     return emptyState("No matching beans", state.unusedOnly ? "Try turning off “Unused”." : "Try a different name.");
   }
 
-  function levelHint(/** @type {number} */ level) {
-    return level <= 0 ? "No project dependencies" : `Depends on up to level ${level - 1}`;
-  }
-
   function card(/** @type {any} */ b) {
     const rel = relation(b.id);
     const deps = b.dependencies.length;
@@ -200,7 +192,7 @@
       users ? `<span title="Beans that inject it">injected by ${users}</span>` : "",
       b.endpoints.length ? `<span title="HTTP endpoints">${plural(b.endpoints.length, "endpoint")}</span>` : "",
     ].filter(Boolean).join(`<span class="sep">·</span>`);
-    return `<button class="card ${lvl(b.level)} ${b.id === state.selectedId ? "selected" : ""} ${rel ? `rel-${rel}` : ""}"
+    return `<button class="card kind-${b.kind} ${b.id === state.selectedId ? "selected" : ""} ${rel ? `rel-${rel}` : ""}"
         data-select="${esc(b.id)}" title="${esc(b.relativeFile)} — double-click to open">
       <span class="card-top">
         <span class="card-name">${highlight(displayName(b))}</span>
@@ -215,49 +207,30 @@
   }
 
   function renderBoard() {
-    const byLevel = state.groupBy === "level";
-    /** @type {Map<string | number, any[]>} */
+    /** @type {Map<string, any[]>} */
     const groups = new Map();
     for (const b of state.data.beans) {
       if (!nameMatches(b)) continue;
-      const key = byLevel ? b.level : b.kind;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(b);
+      if (!groups.has(b.kind)) groups.set(b.kind, []);
+      groups.get(b.kind).push(b);
     }
     if (groups.size === 0) {
-      content.innerHTML = state.data.beans.length ? boardHead() + noMatches()
+      content.innerHTML = state.data.beans.length ? noMatches()
         : emptyState("No Spring beans found", "Open a folder containing a Spring project, then re-analyze.");
       return;
     }
-    const keys = byLevel
-      ? [...groups.keys()].sort((a, b) => Number(a) - Number(b))
-      : KIND_ORDER.filter(k => groups.has(k));
-    const columns = keys.map(key => {
+    const columns = KIND_ORDER.filter(k => groups.has(k)).map(key => {
       const items = groups.get(key).sort(byName);
-      const head = byLevel
-        ? `<span class="dot"></span>
-           <span class="column-title">Level ${key}</span>
-           <span class="count-pill">${items.length}</span>
-           <span class="column-hint">${levelHint(Number(key))}</span>`
-        : `<span class="dot"></span>
-           <span class="column-title">${esc(KINDS[/** @type {keyof KINDS} */ (key)].title)}</span>
-           <span class="count-pill">${items.length}</span>`;
-      return `<section class="column ${byLevel ? lvl(Number(key)) : `kind-${key}`}">
-        <header class="column-head">${head}</header>
+      return `<section class="column kind-${key}">
+        <header class="column-head">
+          <span class="dot"></span>
+          <span class="column-title">${esc(KINDS[/** @type {keyof KINDS} */ (key)].title)}</span>
+          <span class="count-pill">${items.length}</span>
+        </header>
         <div class="cards">${items.map(card).join("")}</div>
       </section>`;
     }).join("");
-    content.innerHTML = `${boardHead()}<div class="board">${columns}</div>`;
-  }
-
-  function boardHead() {
-    return `<div class="board-head">
-      <span class="muted">Group by</span>
-      <div class="segmented small-seg" role="radiogroup" aria-label="Group by">
-        <button class="seg ${state.groupBy === "level" ? "active" : ""}" data-group="level" role="radio" aria-checked="${state.groupBy === "level"}">Level</button>
-        <button class="seg ${state.groupBy === "kind" ? "active" : ""}" data-group="kind" role="radio" aria-checked="${state.groupBy === "kind"}">Stereotype</button>
-      </div>
-    </div>`;
+    content.innerHTML = `<div class="board">${columns}</div>`;
   }
 
   function renderHierarchy() {
@@ -275,7 +248,7 @@
       const expanded = children.length > 0 && (state.expanded.has(pathKey) || childFilter);
       const rel = relation(id);
       const guides = `<span class="guide"></span>`.repeat(depth);
-      rows.push(`<div class="row ${lvl(b.level)} ${id === state.selectedId ? "selected" : ""} ${rel ? `rel-${rel}` : ""} ${filterActive() && !nameMatches(b) ? "context" : ""}"
+      rows.push(`<div class="row kind-${b.kind} ${id === state.selectedId ? "selected" : ""} ${rel ? `rel-${rel}` : ""} ${filterActive() && !nameMatches(b) ? "context" : ""}"
           data-select="${esc(id)}" data-path="${esc(pathKey)}" role="treeitem" aria-expanded="${children.length ? expanded : ""}" title="${esc(b.relativeFile)} — double-click to open">
         ${guides}
         <span class="caret ${children.length ? (expanded ? "open" : "") : "none"}" data-toggle="${esc(pathKey)}"></span>
@@ -333,7 +306,7 @@
       if (!endpoints.length) return "";
       return `<article class="endpoint-group">
         <header class="endpoint-head">
-          <button class="chip ${lvl(b.level)}" data-select="${esc(b.id)}" data-goto="board" title="Show on board"><span class="dot"></span>${highlight(b.name)}</button>
+          <button class="chip kind-${b.kind}" data-select="${esc(b.id)}" data-goto="board" title="Show on board"><span class="dot"></span>${highlight(b.name)}</button>
           <span class="card-path">${esc(b.relativeFile)}</span>
           <span class="spacer"></span>
           <span class="count-pill" title="Endpoints">${endpoints.length}</span>
@@ -345,7 +318,7 @@
   }
 
   function chip(/** @type {any} */ b, /** @type {string} */ goto = "") {
-    return `<button class="chip ${lvl(b.level)}" data-select="${esc(b.id)}" ${goto ? `data-goto="${goto}"` : ""} title="${esc(b.relativeFile)}"><span class="dot"></span>${esc(displayName(b))}</button>`;
+    return `<button class="chip kind-${b.kind}" data-select="${esc(b.id)}" ${goto ? `data-goto="${goto}"` : ""} title="${esc(b.relativeFile)}"><span class="dot"></span>${esc(displayName(b))}</button>`;
   }
 
   function chipList(/** @type {any[]} */ items, /** @type {string} */ emptyText) {
@@ -366,7 +339,7 @@
     const owner = b.declaredBy && byId.get(b.declaredBy);
     details.classList.remove("hidden");
     details.innerHTML = `
-      <header class="details-head ${lvl(b.level)}">
+      <header class="details-head kind-${b.kind}">
         <div class="details-title">
           <h2>${esc(displayName(b))}</h2>
           <button class="icon-button" data-action="deselect" title="Close (Esc)" aria-label="Close details">
@@ -460,15 +433,6 @@
     const tab = target.closest(".tab");
     if (tab) {
       switchView(/** @type {HTMLElement} */ (tab).dataset.view || "board");
-      return;
-    }
-
-    const group = target.closest("[data-group]");
-    if (group) {
-      state.groupBy = /** @type {HTMLElement} */ (group).dataset.group || "level";
-      saveState();
-      render();
-      scrollSelectedIntoView();
       return;
     }
 

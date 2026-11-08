@@ -12,7 +12,7 @@ The workspace is analyzed the first time the panel opens; use the ⟳ button to 
 
 ## Views
 
-- **Board** — one column per level, or per stereotype (controllers, services, repositories…). Select a bean to highlight what it injects (green) and what injects it (purple).
+- **Board** — one column per stereotype (controllers, services, repositories…). Select a bean to highlight what it injects (green) and what injects it (purple).
 - **Hierarchy** — top-level beans (not injected by any other bean, typically controllers) at the root; expand one to see what it injects, recursively. Circular dependencies are marked `↻ circular`.
 - **Endpoints** — every HTTP endpoint grouped by controller, with its method and full path (class-level `@RequestMapping` prefix included). Click one to jump to its handler.
 
